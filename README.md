@@ -14,7 +14,7 @@ Analysis, classification, and visualization code for the manuscript:
 | `Image_Classification.py` | Python | Runs PyTorch/ResNet-152 inference on CPICS `.png` ROIs (adapted from [SPC-UW-ZooCam](https://github.com/SPC-UW-ZooCam)) and filters predictions at $P \ge 0.70$. |
 | `batch_cpics_classifier.ipynb` | Python | Batch wrapper around `Image_Classification.py`; validates ROI counts and generates seasonal/monthly bubble artifact plots (**Figure S4**). |
 | `seascape_extractor_cpics.ipynb` | Python | Queries NOAA CoastWatch THREDDS for 8-day and monthly satellite seascapes and extracts modal classes/probabilities via KD-Tree matching. |
-| `plankton_analysis.ipynb` | Python | Matches CPICS ROIs to CTD metadata, computes concentrations, and generates **Figures 3, 4, 5 (PCA), 7, S3, and S4**. |
+| `plankton_analysis.ipynb` | Python | Matches CPICS ROIs to CTD metadata, computes concentrations, and generates **Figures 3, 4, 5 (PCA), and 7**. |
 | `cpics_image-seascape_analysis.Rmd` | R | Integrates CPICS counts with CTD metadata and seascapes; generates concentration time series, seasonal boxplots, and stacked bar charts (**Figures 3, 4, 5, 7**). |
 | `seascape_similarity_analysis.Rmd` | R | Computes pairwise abundance-based Chao-Jaccard (Ružička) similarity matrices and renders heatmaps (**Figure 8**). |
 | `seascape_mapping.m` | MATLAB | Downloads monthly satellite seascapes from NOAA CoastWatch THREDDS and maps stations overlaid on seascapes (**Figure 1**). |
