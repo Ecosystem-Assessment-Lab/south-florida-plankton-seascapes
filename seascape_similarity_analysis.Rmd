@@ -1,0 +1,269 @@
+---
+title: "seascape_similarity_coefficients"
+output: html_document
+date: "2025-11-05"
+---
+
+# Seascape Similarity Analysis
+
+This R Markdown script calculates and visualizes the pairwise similarity between different seascape meta-communities based on plankton counts. It allows users to dynamically toggle between analyzing zooplankton or phytoplankton assemblages.
+
+**Primary Workflows:**
+
+* Aggregate plankton count data into representative meta-communities for each 8-day seascape class.
+* Calculate the Chao-Jaccard (abundance-based) similarity index for all unique seascape pairs.
+* Apply a masking function to filter duplicate or lower-triangle values for cleaner visualization.
+* Render a publication-ready pairwise similarity heatmap comparing seascape classes.
+
+**Required Input Files & Directories:**
+
+* `TS.Master`: *.txt classification files.
+* `ctd_meta_v4.csv`: Cruise CTD sampling events and data.
+
+**Environment Requirements & Dependencies:**
+
+* **Data Manipulation & Formatting:** `dplyr`, `tidyr`, `tidyverse`, `lubridate`
+* **Visualization:** `ggplot2`
+
+**Author:** E. Montes (enrique.montes@noaa.gov)
+
+**Date:** November 5th, 2025
+
+# Load data files
+```{r}
+library(tidyverse)
+library(ggplot2)
+
+# specify the directory where the files are located
+dir_path <- "TS.Master"
+
+# obtain a list of file names in the directory
+file_names <- list.files(path = dir_path, pattern = ".txt", full.names = TRUE)
+
+# loop over each file and import the tables (use this for DATES)
+for (file in file_names) {
+  table_name <- gsub(".txt", "", basename(file)) # get the name of the table from the file name
+  assign(table_name, read.table(file = file, header = FALSE, sep = "\t") %>%
+           mutate(date = as.POSIXct(substr(V1, start = 24, stop = 36), format="%Y%m%d_%H%M", tz="UTC")))
+}
+
+```
+
+# Match file name to cruise data using DATE 
+```{r}
+library(lubridate)
+library(dplyr)
+
+dir_path2 <- "cruise_ctd"
+file_name <- list.files(path = dir_path2, pattern = "ctd_meta_v4.csv", full.names = TRUE)
+ctd_meta <- read.csv(file_name, fill = TRUE)
+
+# Parse dt_list securely and concisely
+dt_list <- as.POSIXct(
+  sprintf("%04d%02d%02d %s", ctd_meta$year, ctd_meta$month, ctd_meta$day, ctd_meta$time_gmt),
+  format = "%Y%m%d %I:%M:%S %p", 
+  tz = "UTC"
+)
+
+################################################################################
+# Detect short transit times between stations
+################################################################################
+# Vectorized difference calculation in mins
+time_differences_mins <- as.numeric(diff(dt_list), units = "mins")
+
+time_diff_df <- data.frame(
+  start_time = dt_list[-length(dt_list)],
+  end_time = dt_list[-1],
+  time_difference_mins = time_differences_mins
+)
+
+# CTD time stamps of consecutive stations within less than 20 min
+short_timestamps <- dt_list[which(time_differences_mins < 20)]
+
+################################################################################
+# Match CPICS records to CTD times & Check unaccounted records
+################################################################################
+class_names <- c("Acantharea", "Centric", "Ceratium", "Chaetoceros", "Chaetognaths", 
+                 "Chain2", "Chain3", "Ostracods", "Copepods", "Decapods", "Echinoderms", 
+                 "Guinardia", "Jellies", "Larvaceans", "Neocalyptrella", "Noctiluca", 
+                 "pellets", "Polychaets", "Pteropods", "Tricho")
+
+date_limit <- as.POSIXct("2024-11-30", tz = "UTC")
+buffer_sec <- 10 * 60 
+
+# Pre-calculate start and end intervals for fast vectorized comparisons
+interval_start <- dt_list - buffer_sec
+interval_end <- c(dt_list[-1] - buffer_sec, date_limit + 1)
+
+# Process classes in a single pass
+results <- setNames(lapply(class_names, function(cname) {
+  
+  # Fetch ALL data to ensure no unaccounted records slip by
+  dts_all <- get(paste0("class.", cname))$date
+  
+  counts <- integer(length(dt_list))
+  accounted <- logical(length(dts_all)) # Tracks if a date falls into any interval
+  
+  # Check all dates against intervals
+  for (i in seq_along(dt_list)) {
+    idx <- dts_all >= interval_start[i] & dts_all < interval_end[i]
+    counts[i] <- sum(idx & dts_all <= date_limit) # Apply date_limit ONLY to the final count
+    accounted[idx] <- TRUE
+  }
+  
+  list(counts = counts, unaccounted = dts_all[!accounted])
+  
+}), class_names)
+
+# Assemble the final concentration dataframe efficiently
+conc_occ_final <- data.frame(date = dt_list)
+for (cname in class_names) conc_occ_final[[cname]] <- results[[cname]]$counts
+
+# Combine with metadata and calculate volume
+taxa_meta <- cbind(ctd_meta, conc_occ_final) %>%
+  mutate(
+    sampled_vol_per_min = max(sampled_vol_per_min, na.rm = TRUE),
+    total_vol_sampled = sampled_vol_per_min * conc_deployDurMin
+  )
+
+################################################################################
+# Output Unaccounted Records & Summary Stats
+################################################################################
+# Print unaccounted dates per class
+for (cname in class_names) {
+  cat("Unaccounted dates for class:", cname, "\n")
+  print(results[[cname]]$unaccounted)
+  cat("\n")
+}
+
+# Pre-calculate boolean vectors to simplify stat logic
+has_vol <- !is.na(taxa_meta$total_vol_sampled)
+has_seascape <- !is.na(taxa_meta$X8.day.seascapes)
+
+sampling_events_img <- sum(has_vol)
+seascape_total <- sum(has_seascape)
+seascape_match <- sum(has_seascape & has_vol)
+total_casts <- nrow(taxa_meta)
+percent_match <- round((seascape_match / sampling_events_img) * 100, 0)
+
+# Calculates number of stations occupied during each cruise
+station_num_per_cruise <- tapply(taxa_meta$Station, taxa_meta$cruiseID, function(x) length(unique(x)))
+
+# Print stats
+cat("Total number CTD casts:", total_casts, "\n")
+cat("Percent of CTD casts with seascape match:", round((seascape_total / total_casts) * 100, 0), "%\n")
+cat("Percent of CTD casts with images (image profiles):", round((sampling_events_img / total_casts) * 100, 0), "%\n")
+cat("Percent of image profiles matched to seascapes:", percent_match, "%\n\n")
+
+print(as.table(station_num_per_cruise))
+```
+
+# Calculate Pairwise Seascape Similarity (Figure 8)
+```{R}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# 1. Define toggle groups
+zooplankton <- c("Acantharea", "Chaetognaths", "Ostracods", "Copepods", "Decapods", 
+                 "Echinoderms", "Jellies", "Larvaceans", "Polychaets", "Pteropods")
+phytoplankton <- c("Centric", "Ceratium", "Chaetoceros", "Chain2", "Chain3", 
+                   "Guinardia", "Neocalyptrella", "Noctiluca", "Tricho")
+meta_cols <- c("Station", "year", "month", "X8.day.seascapes", "focus_threshold", 
+               "sampled_vol_per_min", "total_vol_sampled")
+
+# 2. SET YOUR TOGGLE HERE: Change to either 'zooplankton' or 'phytoplankton'
+target_taxa <- phytoplankton 
+
+# 3. Format data and calculate community abundance
+c_mh_long <- taxa_meta %>%
+  # Select metadata and the target taxa dynamically
+  select(all_of(meta_cols), all_of(target_taxa)) %>%
+  # Ensure the target taxa columns are formatted properly
+  mutate(across(all_of(target_taxa), as.numeric)) %>%
+  filter(!is.na(total_vol_sampled) & !is.na(X8.day.seascapes)) %>%
+  # Pivot only the selected target taxa
+  pivot_longer(cols = all_of(target_taxa),
+               names_to = "species", values_to = "species_concentration")
+
+seascape_meta_communities <- c_mh_long %>%
+  group_by(X8.day.seascapes, species) %>%
+  summarise(abundance = sum(species_concentration, na.rm = TRUE), .groups = 'drop') %>%
+  filter(abundance > 0)
+
+# 4. Nest communities and generate pairwise combinations
+nested_seascapes <- seascape_meta_communities %>%
+  group_by(X8.day.seascapes) %>%
+  nest(community_data = -X8.day.seascapes)
+
+seascape_pairs <- nested_seascapes %>%
+  select(seascape_1 = X8.day.seascapes, data_1 = community_data) %>%
+  crossing(
+    nested_seascapes %>%
+      select(seascape_2 = X8.day.seascapes, data_2 = community_data)
+  )
+
+# 5. Define Chao-Jaccard calculation function
+calculate_chao_jaccard <- function(df1, df2) {
+  combined <- full_join(df1, df2, by = "species", suffix = c("_1", "_2")) %>%
+    mutate(
+      abundance_1 = replace_na(abundance_1, 0),
+      abundance_2 = replace_na(abundance_2, 0)
+    )
+  n <- sum(combined$abundance_1)
+  m <- sum(combined$abundance_2)
+  if (n == 0 || m == 0) return(NA_real_)
+
+  p_i <- combined$abundance_1 / n
+  q_i <- combined$abundance_2 / m
+
+  sum_of_mins <- sum(pmin(p_i, q_i))
+  sum_of_maxs <- sum(pmax(p_i, q_i))
+
+  return(sum_of_mins / sum_of_maxs)
+}
+
+# 6. Calculate similarities and mask duplicate/lower triangle values
+pairwise_similarity_updated <- seascape_pairs %>%
+  rowwise() %>%
+  mutate(C_J = calculate_chao_jaccard(data_1, data_2)) %>%
+  select(seascape_1, seascape_2, C_J) %>%
+  mutate(
+    C_J = if_else(
+      as.numeric(as.character(seascape_2)) < as.numeric(as.character(seascape_1)),
+      NA_real_,
+      C_J
+    )
+  )
+
+# 7. Render Final Heatmap
+pairwise_similarity_updated$seascape_1 <- factor(pairwise_similarity_updated$seascape_1,
+                                   levels = c(3, 11, 13, 15, 21, 27),
+                                   labels = c("TST", "TSU", "SGMI", "TS", "WBHN", "HE"))
+pairwise_similarity_updated$seascape_2 <- factor(pairwise_similarity_updated$seascape_2,
+                                   levels = c(3, 11, 13, 15, 21, 27),
+                                   labels = c("TST", "TSU", "SGMI", "TS", "WBHN", "HE"))
+
+similarity_hm <- ggplot(pairwise_similarity_updated, aes(x = seascape_1, y = seascape_2, fill = C_J)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(C_J, 2)), color = "black", size = 8) +
+  scale_fill_gradient(
+    low = "#fee8c8", 
+    high = "#006400", # b30000 for zooplankton / 006400 for phyto
+    name = "Similarity", 
+    limit = c(0.21,1),
+    breaks = seq(0.2, 1.0, by = 0.2)) +  
+  labs(x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(
+    axis.text.x  = element_text(size = 32, angle = 0, color = "black"),
+    axis.text.y  = element_text(size = 32, angle = 0, color = "black"),
+    panel.grid = element_blank(),
+    legend.text = element_text(size = 18),
+    legend.title = element_text(size = 22, margin = margin(b = 15)))
+
+print(similarity_hm)
+```
+
+
+
