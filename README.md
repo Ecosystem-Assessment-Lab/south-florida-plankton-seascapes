@@ -1,4 +1,5 @@
 # SFER Plankton Imaging & Dynamic Satellite Seascapes
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24518449.svg)](https://doi.org/10.5281/zenodo.24518449)
 
 Analysis, classification, and visualization code for the manuscript:
 
