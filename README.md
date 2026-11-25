@@ -48,7 +48,7 @@ Analyses were conducted using the following software versions:
 
 If you use this code, please cite the manuscript and the Zenodo archive:
 
-> Montes, E. et al. Code for: Scaling plankton imaging observations using dynamic satellite seascapes for characterizing the biogeography of phytoplankton and zooplankton in South Florida, USA (v1.0.0). *Zenodo* https://doi.org/10.5281/zenodo.XXXXXXX (2026).
+> Montes, E. et al. Code for: Scaling plankton imaging observations using dynamic satellite seascapes for characterizing the biogeography of phytoplankton and zooplankton in South Florida, USA (v1.0.0). *Zenodo* https://doi.org/10.5281/zenodo.24518449 (2026).
 
 ---
 
